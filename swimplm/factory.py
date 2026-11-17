@@ -39,7 +39,8 @@ def build_test(name: str, settings: MethodSettings, ref_features: np.ndarray):
     if name == "falkon" or name.startswith("falkon@"):
         percentile = float(name.split("@")[1]) if "@" in name else 50.0
         sigma = float(candidate_widths(ref_features, [percentile], add_broad=False)[0])
-        return Falkon(sigma=sigma, M=settings.falkon_M, lam=settings.falkon_lambda)
+        # Always Falkon's CPU backend: toy jobs run on CPU nodes (a CPU-only Falkon build suffices).
+        return Falkon(sigma=sigma, M=settings.falkon_M, lam=settings.falkon_lambda, use_cpu=True)
     if name in ("swim", "swim-uniform"):
         return Swim(layer_widths=tuple(settings.swim_widths), activation=settings.swim_activation,
                     sample_uniformly=(name == "swim-uniform"), l2=settings.swim_l2,

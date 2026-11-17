@@ -30,7 +30,7 @@ scripts/
   run_toys.py                      one method: toys on an embedding .npz, print Z
   compare_methods.py               all methods on identical toys vs signal strength
   merge_summaries.py               combine the summary.csv files of several jobs
-cluster/                    SLURM: config, environment setup, job scripts, submission
+cluster/submit_all.sh       SLURM: settings + submission of the whole chain
 tests/                      SparKer/Falkon vs original code, toy options, SWIM checks
 
 cli.py, submit.sh           embedding training (Lightning CLI); submit.sh is the original
@@ -43,62 +43,53 @@ models/ data/ utils/ opt/   phlab-neurips25 code, copied unchanged (training + r
 
 ## Running on a SLURM cluster
 
-Run everything from the repository root.
+Everything is in one script, `cluster/submit_all.sh`. Run it from the repository root.
 
-1. **Configure.** Edit the first block of `cluster/config.sh`: `JETCLASS_DIR` (the
-   directory containing `train_100M/`, `val_5M/` and `test_20M/`), `WORK_DIR`,
-   `GPU_PARTITION`, `CPU_PARTITION`, `SBATCH_EXTRA` (e.g. `--account=...`), `CUDA_MODULE`,
-   and `activate_env` if you don't use conda. The second block holds the experiment
-   settings (signal class, yields, toys, methods, scan values).
-2. **Create the environment** (conda env + swimplm + swimnetworks + Falkon built from
-   source). For GPU support of Falkon, run it where `nvcc` is available. Add
-   `FORCE_ONLY_CPU=1` for a CPU-only Falkon.
+1. **Environment** (once). Falkon only needs its CPU build, because all toy jobs run on
+   CPU nodes:
 
    ```bash
-   bash cluster/setup_env.sh
+   conda env create -n swimplm -f environment.yml
    ```
 
-3. **Submit the full chain**: train → embed → one toy job per method → merge.
+   ```bash
+   conda activate swimplm && pip install --no-deps -e .
+   ```
+
+   ```bash
+   FORCE_ONLY_CPU=1 pip install --no-build-isolation git+https://github.com/FalkonML/falkon.git@04f168e9d465829163d0f3512487c55f875fc45f
+   ```
+
+2. **Settings.** Edit the block at the top of `cluster/submit_all.sh`:
+   - site: `JETCLASS_DIR` (the directory containing `train_100M/`, `val_5M/` and
+     `test_20M/`), `WORK_DIR`, `GPU_PARTITION`, `CPU_PARTITION`, `SBATCH_EXTRA`
+     (e.g. `--account=...`), `ENV_SETUP`;
+   - experiment: signal class, yields, number of toys, signal scales, methods;
+   - resources: time, memory and CPUs per job.
+3. **Submit** the chain: training (GPU) → embedding (GPU) → one toy job per method
+   (CPU) → merge (CPU).
 
    ```bash
    bash cluster/submit_all.sh
    ```
 
-   Use `--skip-train` to reuse the checkpoint in `$WORK_DIR/train`, and
-   `--skip-extract` to reuse an existing embedding.
+   - `--skip-train` reuses the newest checkpoint in `$WORK_DIR/train`.
+   - `--skip-extract` reuses the embedding.
+   - `--dry-run` prints the `sbatch` commands without submitting anything.
 
-4. **Tune the regularisation first** (recommended before reading the power numbers).
-   This submits one job per hyperparameter value at signal scales 0 and 1:
-
-   ```bash
-   bash cluster/submit_hparam_scan.sh
-   ```
+All toy jobs run on CPU nodes. SWIM is numpy-only, and Falkon is always run with its CPU
+backend (`use_cpu=True` in `swimplm/factory.py`).
 
 Outputs:
 - `$WORK_DIR/train/`: checkpoints and offline W&B logs (`wandb sync` them later);
 - `$WORK_DIR/jetclass_embedding.npz`;
-- `$WORK_DIR/comparison/<run>/`: t distributions and `summary.csv` per job;
-- `$WORK_DIR/comparison/merged_summary.csv`;
+- `$WORK_DIR/comparison/<method>/`: t distributions and `summary.csv` per method;
+- `$WORK_DIR/comparison/merged_summary.csv`, written by `scripts/merge_summaries.py`;
 - `logs/`: SLURM logs.
 
-Every job script can also be run directly with `bash` (that is how the chain was tested,
-on small fake JetClass files). Extra arguments are passed through. For example, a short
-training run:
-
-```bash
-bash cluster/train.sbatch --trainer.max_epochs 1 --trainer.limit_train_batches 2
-```
-
-All methods share one interface:
-
-```python
-from swimplm import SparKer, Falkon, Swim, run_toys, z_empirical
-
-result = Swim(layer_widths=(512,)).fit(data, ref, w_data, w_ref)   # result.t
-t_alt, t_null = run_toys(SparKer(widths=(2.0,)), data, data_labels, data_weights,
-                         ref, ref_labels, ref_weights, sig_label=1, n_ref=40000, n_toys=100)
-print(z_empirical(t_alt, t_null))
-```
+To scan a hyperparameter (recommended before reading the power numbers, see below),
+set `TOY_ARGS` (e.g. `"--swim-l2 0.1"`) and `METHODS`, change `WORK_DIR`, and resubmit
+with `--skip-extract`.
 
 ## Installation
 
@@ -106,8 +97,8 @@ print(z_empirical(t_alt, t_null))
 pip install -e .
 ```
 
-Falkon has no PyPI wheel; build it from source (`cluster/setup_env.sh` does all of this,
-including the other dependencies in `requirements.txt`):
+Falkon has no PyPI wheel; build it from source (the other dependencies are in
+`requirements.txt` / `environment.yml`):
 
 ```bash
 pip install --no-build-isolation git+https://github.com/FalkonML/falkon.git@04f168e9d465829163d0f3512487c55f875fc45f
@@ -189,4 +180,4 @@ python cli.py fit --config configs/jetclass/jetClass_parT_simCLR_T0.5.yaml
 
 The JetClass root defaults to the original Cannon path; override it with
 `--data.init_args.data_dir /path/to/JetClass`. Logging uses `WandbLogger`; set
-`WANDB_MODE=offline` on nodes without internet (the cluster scripts do this).
+`WANDB_MODE=offline` on nodes without internet (`cluster/submit_all.sh` does this).
