@@ -27,8 +27,8 @@ e.g. with top as signal:
 Example:
     python scripts/extract_jetclass_embeddings.py \
         --config configs/jetclass/jetClass_parT_simCLR_T0.5.yaml \
-        --ckpt runs/jetClass_parT_simCLRWithClassifier_T0.5/.../last.ckpt \
-        --data-dir /path/to/JetClass/test_20M --max-events 500000 \
+        --ckpt work/train \
+        --data-dir /path/to/JetClass --max-events 500000 \
         --output jetclass_embedding.npz
 """
 
@@ -62,6 +62,22 @@ def instantiate(spec):
     return spec
 
 
+def find_checkpoint(path: str) -> str:
+    """Return ``path`` if it is a file, else the newest checkpoint below it.
+
+    With the W&B logger, Lightning stores checkpoints under
+    ``<default_root_dir>/<project>/<run id>/checkpoints/``. A ``last.ckpt``
+    is preferred over other checkpoints.
+    """
+    if os.path.isfile(path):
+        return path
+    candidates = glob.glob(os.path.join(path, "**", "last.ckpt"), recursive=True)
+    candidates = candidates or glob.glob(os.path.join(path, "**", "*.ckpt"), recursive=True)
+    if not candidates:
+        raise FileNotFoundError(f"no .ckpt file found below {path}")
+    return max(candidates, key=os.path.getmtime)
+
+
 def load_model(config: dict, ckpt_path: str, device: str):
     """Build the model from the config and load the checkpoint weights."""
     model = instantiate(config["model"])
@@ -75,19 +91,18 @@ def make_test_loader(config: dict, data_dir: str | None, batch_size: int | None,
     from data.datasets import JetClassDataset
 
     init_args = dict(config["data"]["init_args"])
+    if data_dir is not None:
+        init_args["data_dir"] = data_dir
     if batch_size is not None:
         init_args["batch_size"] = batch_size
     if num_workers is not None:
         init_args["num_workers"] = num_workers
     dataset = JetClassDataset(**init_args)
-    if data_dir is not None:  # replace the hard-coded cluster path
-        dataset.test_file_dict = {
-            c: sorted(glob.glob(os.path.join(data_dir, f"{dataset.all_class_fileHeaders[c]}_*.root")))
-            for c in dataset.classes
-        }
     missing = [c for c, files in dataset.test_file_dict.items() if not files]
     if missing:
-        raise FileNotFoundError(f"no ROOT files found for classes {missing}; set --data-dir")
+        raise FileNotFoundError(
+            f"no ROOT files for classes {missing} in {dataset.test_dir}; set --data-dir to the "
+            "JetClass root (the directory containing test_20M/)")
     return dataset.test_dataloader()
 
 
@@ -118,9 +133,11 @@ def embed(model, loader, device: str, max_events: int | None, representation: st
 def main():
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("--config", required=True, help="training config (cli.py format)")
-    p.add_argument("--ckpt", required=True, help="Lightning checkpoint")
+    p.add_argument("--ckpt", required=True,
+                   help="Lightning checkpoint, or a directory (e.g. the training root) to search for the newest one")
     p.add_argument("--output", required=True, help="output .npz")
-    p.add_argument("--data-dir", default=None, help="directory with the JetClass test ROOT files")
+    p.add_argument("--data-dir", default=None,
+                   help="JetClass root containing test_20M/ (default: the path in data/datasets.py)")
     p.add_argument("--max-events", type=int, default=None)
     p.add_argument("--data-fraction", type=float, default=0.5,
                    help="fraction of jets in the data-like sample; the rest is the reference")
@@ -135,7 +152,9 @@ def main():
 
     with open(args.config) as f:
         config = yaml.safe_load(f)
-    model = load_model(config, args.ckpt, args.device)
+    ckpt = find_checkpoint(args.ckpt)
+    print(f"checkpoint: {ckpt}")
+    model = load_model(config, ckpt, args.device)
     loader = make_test_loader(config, args.data_dir, args.batch_size, args.num_workers)
     mass = None if args.mass_observer.lower() == "none" else args.mass_observer
     features, labels = embed(model, loader, args.device, args.max_events, args.representation, mass)

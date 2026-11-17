@@ -4,3 +4,11 @@
 **/*.pt
 **/*.npy
 **/*.npz
+
+# swimplm outputs
+work/
+logs/
+wandb/
+runs/
+*.egg-info/
+comparison/

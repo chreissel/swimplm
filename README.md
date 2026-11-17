@@ -29,12 +29,64 @@ scripts/
   extract_jetclass_embeddings.py   trained checkpoint + JetClass -> embedding .npz
   run_toys.py                      one method: toys on an embedding .npz, print Z
   compare_methods.py               all methods on identical toys vs signal strength
+  merge_summaries.py               combine the summary.csv files of several jobs
+cluster/                    SLURM: config, environment setup, job scripts, submission
 tests/                      SparKer/Falkon vs original code, toy options, SWIM checks
 
-cli.py, submit.sh           embedding training (Lightning CLI), copied unchanged
+cli.py, submit.sh           embedding training (Lightning CLI); submit.sh is the original
+                            Cannon script, use cluster/ instead
 configs/                    JetClass ParT SimCLR configs
 models/ data/ utils/ opt/   phlab-neurips25 code, copied unchanged (training + reference
-                            implementation used by the tests)
+                            implementation used by the tests), except that
+                            JetClassDataset takes a `data_dir` argument
+```
+
+## Running on a SLURM cluster
+
+Run everything from the repository root.
+
+1. **Configure.** Edit the first block of `cluster/config.sh`: `JETCLASS_DIR` (the
+   directory containing `train_100M/`, `val_5M/` and `test_20M/`), `WORK_DIR`,
+   `GPU_PARTITION`, `CPU_PARTITION`, `SBATCH_EXTRA` (e.g. `--account=...`), `CUDA_MODULE`,
+   and `activate_env` if you don't use conda. The second block holds the experiment
+   settings (signal class, yields, toys, methods, scan values).
+2. **Create the environment** (conda env + swimplm + swimnetworks + Falkon built from
+   source). For GPU support of Falkon, run it where `nvcc` is available. Add
+   `FORCE_ONLY_CPU=1` for a CPU-only Falkon.
+
+   ```bash
+   bash cluster/setup_env.sh
+   ```
+
+3. **Submit the full chain**: train → embed → one toy job per method → merge.
+
+   ```bash
+   bash cluster/submit_all.sh
+   ```
+
+   Use `--skip-train` to reuse the checkpoint in `$WORK_DIR/train`, and
+   `--skip-extract` to reuse an existing embedding.
+
+4. **Tune the regularisation first** (recommended before reading the power numbers).
+   This submits one job per hyperparameter value at signal scales 0 and 1:
+
+   ```bash
+   bash cluster/submit_hparam_scan.sh
+   ```
+
+Outputs:
+- `$WORK_DIR/train/`: checkpoints and offline W&B logs (`wandb sync` them later);
+- `$WORK_DIR/jetclass_embedding.npz`;
+- `$WORK_DIR/comparison/<run>/`: t distributions and `summary.csv` per job;
+- `$WORK_DIR/comparison/merged_summary.csv`;
+- `logs/`: SLURM logs.
+
+Every job script can also be run directly with `bash` (that is how the chain was tested,
+on small fake JetClass files). Extra arguments are passed through. For example, a short
+training run:
+
+```bash
+bash cluster/train.sbatch --trainer.max_epochs 1 --trainer.limit_train_batches 2
 ```
 
 All methods share one interface:
@@ -54,10 +106,11 @@ print(z_empirical(t_alt, t_null))
 pip install -e .
 ```
 
-Falkon has no PyPI wheel; build it from source (CPU build shown):
+Falkon has no PyPI wheel; build it from source (`cluster/setup_env.sh` does all of this,
+including the other dependencies in `requirements.txt`):
 
 ```bash
-pip install --no-build-isolation git+https://github.com/FalkonML/falkon.git
+pip install --no-build-isolation git+https://github.com/FalkonML/falkon.git@04f168e9d465829163d0f3512487c55f875fc45f
 ```
 
 Run the tests from the repository root (the comparison tests also need the dependencies
@@ -93,7 +146,7 @@ python scripts/run_toys.py higgs_cntr_space.npz --method swim --swim-widths 512
    soft-drop mass is appended as the last column.
 
    ```bash
-   python scripts/extract_jetclass_embeddings.py --config configs/jetclass/jetClass_parT_simCLR_T0.5.yaml --ckpt path/to/last.ckpt --data-dir /path/to/JetClass/test_20M --max-events 500000 --output jetclass_embedding.npz
+   python scripts/extract_jetclass_embeddings.py --config configs/jetclass/jetClass_parT_simCLR_T0.5.yaml --ckpt work/train --data-dir /path/to/JetClass --max-events 500000 --output jetclass_embedding.npz
    ```
 
 3. Compare the methods on identical toys. Labels: 0 QCD, 1 top, 2 W, 3 Z, 4 H. The samples
@@ -134,5 +187,6 @@ very large t. For SWIM with 128 neurons on background-only toys, t drops from ab
 python cli.py fit --config configs/jetclass/jetClass_parT_simCLR_T0.5.yaml
 ```
 
-The JetClass data paths are hard-coded for the Cannon cluster in `data/datasets.py`
-(`JetClassDataset`), and logging uses `WandbLogger`.
+The JetClass root defaults to the original Cannon path; override it with
+`--data.init_args.data_dir /path/to/JetClass`. Logging uses `WandbLogger`; set
+`WANDB_MODE=offline` on nodes without internet (the cluster scripts do this).

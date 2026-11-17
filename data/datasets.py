@@ -956,12 +956,16 @@ class TensorImagenetteDataset(GenericDataModule):
         return loader
     
 class JetClassDataset(GenericDataModule):
+    # swimplm change: `data_dir` (the JetClass root containing train_100M/, val_5M/,
+    # test_20M/) replaces the hard-coded cluster path, which stays the default.
+    # On the command line: --data.init_args.data_dir /path/to/JetClass
     def __init__(self,classes,input_config,
+                 data_dir="/n/holystore01/LABS/iaifi_lab/Lab/sambt/JetClass",
                  **kwargs):
         super().__init__(**kwargs)
-        self.train_dir = "/n/holystore01/LABS/iaifi_lab/Lab/sambt/JetClass/train_100M/"
-        self.val_dir = "/n/holystore01/LABS/iaifi_lab/Lab/sambt/JetClass/val_5M/"
-        self.test_dir = "/n/holystore01/LABS/iaifi_lab/Lab/sambt/JetClass/test_20M/"
+        self.train_dir = f"{data_dir}/train_100M/"
+        self.val_dir = f"{data_dir}/val_5M/"
+        self.test_dir = f"{data_dir}/test_20M/"
         
         self.all_classes = ["qcd","wqq","zqq","ttbar","hbb"]
         self.all_class_fileHeaders = {

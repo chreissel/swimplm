@@ -1,0 +1,30 @@
+# Python dependencies of swimplm and of the copied phlab-neurips25 training code.
+# Tested with Python 3.13 and the versions in brackets.
+# Falkon is not on PyPI and is installed separately by cluster/setup_env.sh.
+
+torch                    # 2.15
+torchvision              # 0.29
+lightning                # 2.6
+jsonargparse[signatures] # 4.53
+wandb
+numpy                    # 2.5
+scipy                    # 1.18
+scikit-learn             # 1.9
+matplotlib               # 3.11
+corner                   # 2.3
+lmfit                    # 1.3
+torchmetrics             # 1.9
+pyyaml
+tqdm
+pillow
+psutil
+# JetClass data loading (weaver-style loader in data/jetclass)
+awkward                  # 2.15
+uproot                   # 5.7
+h5py                     # 3.16
+# imported by the original data/ code
+jax                      # 0.12
+pylorentz                # 0.3
+# SWIM sampled networks (pinned commit)
+swimnetworks @ git+https://gitlab.com/fd-research/swimnetworks.git@9f43a0bd9f1f8005971af0085be271b084f2f485
+pytest

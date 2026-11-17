@@ -1,0 +1,9 @@
+# conda env create -f environment.yml   (or use cluster/setup_env.sh, which also installs Falkon)
+name: swimplm
+channels:
+  - conda-forge
+dependencies:
+  - python=3.12
+  - pip
+  - pip:
+      - -r requirements.txt
