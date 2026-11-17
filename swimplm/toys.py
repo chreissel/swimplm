@@ -36,6 +36,37 @@ import torch
 from .nplm import NPLMTest
 
 
+class IsolatedRandomness:
+    """Wrap a test so that its ``fit`` cannot change the toys.
+
+    SparKer draws its initial centroids from numpy's global random
+    generator, so the toys that follow depend on the method being tested.
+    This wrapper saves the global numpy and torch random states, runs
+    ``fit`` with its own seed (``seed``, ``seed + 1``, ...), and then
+    restores them. With the same toy seed, every method then sees exactly
+    the same toys, which a fair comparison needs.
+
+    This breaks the exact reproduction of the original SparKer toys; use the
+    unwrapped test for that.
+    """
+
+    def __init__(self, test: NPLMTest, seed: int = 0):
+        self.test = test
+        self.seed = seed
+        self._calls = 0
+
+    def fit(self, data, ref, w_data=None, w_ref=None):
+        np_state, torch_state = np.random.get_state(), torch.get_rng_state()
+        np.random.seed(self.seed + self._calls)
+        torch.manual_seed(self.seed + self._calls)
+        self._calls += 1
+        try:
+            return self.test.fit(data, ref, w_data, w_ref)
+        finally:
+            np.random.set_state(np_state)
+            torch.set_rng_state(torch_state)
+
+
 def unweight(sample: torch.Tensor, weights: torch.Tensor) -> torch.Tensor:
     """Accept-reject unweighting (``rebalance`` in the original)."""
     keep = torch.rand_like(weights) < weights / torch.max(weights)
@@ -49,6 +80,9 @@ def run_toys(
     sig_label: int,
     n_ref: int,
     n_toys: int,
+    n_sig: float | None = None,
+    n_bkg: float | None = None,
+    signal_scale: float = 1.0,
     drop_last_column: bool = True,
     unweight_reference: bool = False,
     verbose: bool = True,
@@ -63,6 +97,15 @@ def run_toys(
         sig_label: Label of the signal process.
         n_ref: Expected size of the reference sample in each toy.
         n_toys: Number of toys.
+        n_sig: Expected number of signal events per toy. Default: the sum of
+            the signal weights in the data-like sample (original behaviour).
+        n_bkg: Expected number of background events per toy. Default: the sum
+            of the background weights (original behaviour). If given, the
+            reference weights are also rescaled to sum to ``n_bkg``, so that
+            the reference keeps describing the background yield. Use this for
+            unweighted samples such as JetClass.
+        signal_scale: Multiplies the expected signal yield, to scan the
+            injected signal strength. 0 gives background-only "alternative" toys.
         drop_last_column: Remove the last feature (the invariant mass in the
             Higgs inputs) before fitting; ``splitmass=True`` in the original.
         unweight_reference: Unweight the reference once before the toys, so
@@ -85,7 +128,13 @@ def run_toys(
     is_sig = data_labels == sig_label
     sigs, sweights = data[is_sig], data_weights[is_sig]
     bkgs, bweights = data[~is_sig], data_weights[~is_sig]
-    n_sig, n_bkg = float(torch.sum(sweights)), float(torch.sum(bweights))
+    if n_sig is None:
+        n_sig = float(torch.sum(sweights))
+    n_sig = signal_scale * n_sig
+    if n_bkg is None:
+        n_bkg = float(torch.sum(bweights))
+    else:
+        rweights = rweights * (n_bkg / torch.sum(rweights))
     if verbose:
         print(f"expected signal: {n_sig:.1f}, expected background: {n_bkg:.1f}")
     sigs = unweight(sigs, sweights)

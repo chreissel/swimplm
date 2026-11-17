@@ -43,7 +43,9 @@ class Swim:
         activation: "tanh" or "relu"; the matching SWIM sampler is used.
         sample_uniformly: If True, pairs are drawn uniformly, ignoring the
             data/reference labels (plain random features from data pairs).
-        l2: L2 penalty on the readout weights.
+        l2: L2 penalty on the readout weights. This controls overfitting and
+            must be tuned: with weak penalties (e.g. 1e-6) t is huge even
+            without any signal.
         random_seed: Seed of the SWIM sampler (layer i uses random_seed + i).
         max_iter: Maximum number of Newton iterations.
         tol: Stop when the Newton decrement^2 / 2 drops below tol.
@@ -52,7 +54,7 @@ class Swim:
     layer_widths: Sequence[int] = (512,)
     activation: str = "tanh"
     sample_uniformly: bool = False
-    l2: float = 1e-6
+    l2: float = 1.0
     random_seed: int = 1
     max_iter: int = 100
     tol: float = 1e-10
