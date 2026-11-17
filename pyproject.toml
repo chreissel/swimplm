@@ -1,0 +1,24 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "swimplm"
+version = "0.1.0"
+description = "NPLM anomaly tests in learned embeddings: SparKer, Falkon and SWIM sampled networks."
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "numpy",
+    "scipy",
+    "torch",
+    "swimnetworks @ git+https://gitlab.com/fd-research/swimnetworks.git@9f43a0bd9f1f8005971af0085be271b084f2f485",
+]
+
+[project.optional-dependencies]
+# Falkon has no PyPI wheel; install it from source, see README.
+falkon = ["falkon"]
+test = ["pytest"]
+
+[tool.setuptools.packages.find]
+include = ["swimplm*"]
